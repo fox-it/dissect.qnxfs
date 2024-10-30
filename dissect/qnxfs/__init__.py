@@ -8,18 +8,19 @@ from dissect.qnxfs.exceptions import (
 )
 from dissect.qnxfs.qnx4 import QNX4
 from dissect.qnxfs.qnx6 import QNX6
-from dissect.qnxfs.qnxfs import QNXFS
+from dissect.qnxfs.qnxfs import QNXFS, is_qnxfs
 
 __all__ = [
-    "c_qnx4",
-    "c_qnx6_be",
-    "c_qnx6_le",
-    "c_qnx6",
+    "QNX4",
+    "QNX6",
+    "QNXFS",
     "Error",
     "FileNotFoundError",
     "NotADirectoryError",
     "NotASymlinkError",
-    "QNX4",
-    "QNX6",
-    "QNXFS",
+    "c_qnx4",
+    "c_qnx6",
+    "c_qnx6_be",
+    "c_qnx6_le",
+    "is_qnxfs",
 ]

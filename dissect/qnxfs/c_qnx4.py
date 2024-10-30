@@ -102,5 +102,4 @@ struct qnx4_super_block {
 };
 """
 
-c_qnx4 = cstruct()
-c_qnx4.load(qnx4_def)
+c_qnx4 = cstruct().load(qnx4_def)

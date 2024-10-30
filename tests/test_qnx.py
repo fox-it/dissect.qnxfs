@@ -1,21 +1,26 @@
 from __future__ import annotations
 
+from io import BytesIO
+
 import pytest
 
 from dissect.qnxfs.qnx4 import QNX4
 from dissect.qnxfs.qnx6 import QNX6
+from dissect.qnxfs.qnxfs import is_qnxfs
 
 
 @pytest.mark.parametrize(
-    "name, FS",
+    ("name", "FS"),
     [
         ("qnx6_le", QNX6),
         ("qnx6_be", QNX6),
         ("qnx4", QNX4),
     ],
 )
-def test_qnx6(name: str, FS: type[QNX4] | type[QNX6], request: pytest.FixtureRequest) -> None:
+def test_qnx(name: str, FS: type[QNX4 | QNX6], request: pytest.FixtureRequest) -> None:
     fh = request.getfixturevalue(name)
+
+    assert is_qnxfs(fh)
 
     fs = FS(fh)
 
@@ -61,3 +66,7 @@ def test_qnx6(name: str, FS: type[QNX4] | type[QNX6], request: pytest.FixtureReq
     entry = fs.get("dir/another.txt")
     assert entry.is_file()
     assert entry.open().read() == b"very realtime\n"
+
+
+def test_qnx_invalid() -> None:
+    assert not is_qnxfs(BytesIO(b""))

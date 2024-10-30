@@ -131,9 +131,7 @@ struct qnx6_mmi_super_block {
 """
 
 
-c_qnx6_le = cstruct()
-c_qnx6_le.load(qnx6_def)
-c_qnx6_be = cstruct(endian=">")
-c_qnx6_be.load(qnx6_def)
+c_qnx6_le = cstruct().load(qnx6_def)
+c_qnx6_be = cstruct(endian=">").load(qnx6_def)
 
 c_qnx6 = c_qnx6_le

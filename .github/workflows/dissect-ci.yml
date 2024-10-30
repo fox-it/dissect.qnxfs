@@ -32,5 +32,6 @@ jobs:
   trigger-tests:
     needs: [publish]
     uses: fox-it/dissect-workflow-templates/.github/workflows/dissect-ci-demand-test-template.yml@main
+    secrets: inherit
     with:
       on-demand-test: 'dissect.target'

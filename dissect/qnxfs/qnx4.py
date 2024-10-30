@@ -5,9 +5,8 @@
 from __future__ import annotations
 
 import stat
-from datetime import datetime
 from functools import cached_property, lru_cache
-from typing import BinaryIO, Iterator, Optional
+from typing import TYPE_CHECKING, BinaryIO
 
 from dissect.util import ts
 from dissect.util.stream import RunlistStream
@@ -20,6 +19,10 @@ from dissect.qnxfs.exceptions import (
     NotASymlinkError,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from datetime import datetime
+
 
 class QNX4:
     """QNX4 filesystem implementation.
@@ -29,12 +32,11 @@ class QNX4:
     """
 
     def __init__(self, fh: BinaryIO):
-        self.fh = fh
-
-        fh.seek(c_qnx4.QNX4_BLOCK_SIZE)
-        if fh.read(16) != b"/" + b"\x00" * 15:
+        if not _is_qnx4(fh):
             raise ValueError("Invalid QNX4 filesystem")
 
+        self.fh = fh
+        self.block_size = c_qnx4.QNX4_BLOCK_SIZE
         self.inode = lru_cache(1024)(self.inode)
 
         self.root = INode(self, c_qnx4.QNX4_ROOT_INO * c_qnx4.QNX4_INODES_PER_BLOCK)
@@ -42,7 +44,7 @@ class QNX4:
     def inode(self, inum: int) -> INode:
         return INode(self, inum)
 
-    def get(self, path: str | int, node: Optional[INode] = None) -> INode:
+    def get(self, path: str | int, node: INode | None = None) -> INode:
         if isinstance(path, int):
             return self.inode(path)
 
@@ -79,7 +81,7 @@ class INode:
 
     def _read_inode(self) -> c_qnx4.qnx4_inode_entry:
         block, index = divmod(self.inum, c_qnx4.QNX4_INODES_PER_BLOCK)
-        self.fs.fh.seek((block * c_qnx4.QNX4_BLOCK_SIZE) + (index * c_qnx4.QNX4_DIR_ENTRY_SIZE))
+        self.fs.fh.seek((block * self.fs.block_size) + (index * c_qnx4.QNX4_DIR_ENTRY_SIZE))
         return c_qnx4.qnx4_inode_entry(self.fs.fh)
 
     @cached_property
@@ -123,8 +125,8 @@ class INode:
         return ts.from_unix(self.inode.di_atime)
 
     @cached_property
-    def ctime(self) -> int:
-        """Return the datetime creation time."""
+    def ctime(self) -> datetime:
+        """Return the file change time."""
         return ts.from_unix(self.inode.di_ctime)
 
     @cached_property
@@ -193,7 +195,7 @@ class INode:
 
     def listdir(self) -> dict[str, INode]:
         """Return a directory listing."""
-        return {name: inode for name, inode in self.iterdir()}
+        return dict(self.iterdir())
 
     def iterdir(self) -> Iterator[tuple[str, INode]]:
         """Iterate directory contents."""
@@ -203,7 +205,7 @@ class INode:
         fh = self.fs.fh
         for block, size in self._iter_chain():
             for i in range(c_qnx4.QNX4_INODES_PER_BLOCK * size):
-                fh.seek((block * c_qnx4.QNX4_BLOCK_SIZE) + (i * c_qnx4.QNX4_DIR_ENTRY_SIZE))
+                fh.seek((block * self.fs.block_size) + (i * c_qnx4.QNX4_DIR_ENTRY_SIZE))
 
                 buf = fh.read(c_qnx4.QNX4_DIR_ENTRY_SIZE)
                 if len(buf) != c_qnx4.QNX4_DIR_ENTRY_SIZE:
@@ -222,7 +224,7 @@ class INode:
                     inum = ((link_info.dl_inode_blk - 1) * c_qnx4.QNX4_INODES_PER_BLOCK) + link_info.dl_inode_ndx
 
                     if link_info.dl_lfn_blk:
-                        fh.seek((link_info.dl_lfn_blk - 1) * c_qnx4.QNX4_BLOCK_SIZE)
+                        fh.seek((link_info.dl_lfn_blk - 1) * self.fs.block_size)
                         lfn_entry = c_qnx4.qnx4_longfilename_entry(fh)
                         name = lfn_entry.lfn_name
                     else:
@@ -245,7 +247,7 @@ class INode:
 
         xblk_num = self.inode.di_xblk
         while num_extents:
-            self.fs.fh.seek((xblk_num - 1) * c_qnx4.QNX4_BLOCK_SIZE)
+            self.fs.fh.seek((xblk_num - 1) * self.fs.block_size)
             xblk = c_qnx4.qnx4_xblk(self.fs.fh)
             if xblk.signature != b"IamXblk":
                 raise Error("Invalid QNX4 xblk signature")
@@ -258,8 +260,13 @@ class INode:
 
     def dataruns(self) -> list[tuple[int, int]]:
         """Return the data runlist."""
-        return [(block, size) for block, size in self._iter_chain()]
+        return list(self._iter_chain())
 
     def open(self) -> BinaryIO:
         """Return a file-like object for reading the file."""
-        return RunlistStream(self.fs.fh, self.dataruns(), self.size, c_qnx4.QNX4_BLOCK_SIZE)
+        return RunlistStream(self.fs.fh, self.dataruns(), self.size, self.fs.block_size)
+
+
+def _is_qnx4(fh: BinaryIO) -> bool:
+    fh.seek(c_qnx4.QNX4_BLOCK_SIZE)
+    return fh.read(16) == b"/" + b"\x00" * 15

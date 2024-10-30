@@ -6,9 +6,8 @@ from __future__ import annotations
 
 import stat
 import struct
-from datetime import datetime
 from functools import cached_property, lru_cache
-from typing import BinaryIO, Iterator, Optional
+from typing import TYPE_CHECKING, BinaryIO
 from uuid import UUID
 
 from dissect.util import ts
@@ -22,6 +21,12 @@ from dissect.qnxfs.exceptions import (
     NotASymlinkError,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from datetime import datetime
+
+    from dissect.cstruct import cstruct
+
 
 class QNX6:
     """QNX6 filesystem implementation.
@@ -32,31 +37,9 @@ class QNX6:
 
     def __init__(self, fh: BinaryIO):
         self.fh = fh
-        self._c_qnx = None
+        self._c_qnx: c_qnx6 = None
 
-        sb_offset = None
-        for sb_offset in [c_qnx6.QNX6_BOOTBLOCK_SIZE, 0]:
-            fh.seek(sb_offset)
-            try:
-                sb = c_qnx6_le.qnx6_super_block(fh)
-            except EOFError:
-                continue
-
-            if sb.sb_magic != c_qnx6.QNX6_SUPER_MAGIC:
-                fh.seek(sb_offset)
-                sb = c_qnx6_be.qnx6_super_block(fh)
-                if sb.sb_magic != c_qnx6.QNX6_SUPER_MAGIC:
-                    continue
-
-                self._c_qnx = c_qnx6_be
-            else:
-                self._c_qnx = c_qnx6_le
-
-            self.sb1 = sb
-            break
-        else:
-            raise ValueError("Unable to find QNX6 superblock")
-
+        sb_offset, self.sb1, self._c_qnx = _find_sb(fh)
         second_sb_offset = self.sb1.sb_num_blocks * self.sb1.sb_blocksize + sb_offset + c_qnx6.QNX6_SUPERBLOCK_AREA
         fh.seek(second_sb_offset)
         self.sb2 = self._c_qnx.qnx6_super_block(fh)
@@ -94,7 +77,7 @@ class QNX6:
         """Return an inode by number."""
         return INode(self, inum)
 
-    def get(self, path: str | int, node: Optional[INode] = None) -> INode:
+    def get(self, path: str | int, node: INode | None = None) -> INode:
         """Return an inode by path."""
         if isinstance(path, int):
             return self.inode(path)
@@ -171,8 +154,8 @@ class INode:
         return ts.from_unix(self.inode.di_atime)
 
     @cached_property
-    def ctime(self) -> int:
-        """Return the datetime creation time."""
+    def ctime(self) -> datetime:
+        """Return the file change time."""
         return ts.from_unix(self.inode.di_ctime)
 
     @cached_property
@@ -231,7 +214,7 @@ class INode:
 
     def listdir(self) -> dict[str, INode]:
         """Return a directory listing."""
-        return {name: inode for name, inode in self.iterdir()}
+        return dict(self.iterdir())
 
     def iterdir(self) -> Iterator[tuple[str, INode]]:
         """Iterate directory contents."""
@@ -267,6 +250,27 @@ class INode:
         return RunlistStream(self.fs.fh, self.dataruns(), self.size, self.fs.block_size)
 
 
+def _find_sb(fh: BinaryIO) -> tuple[int, c_qnx6.qnx6_super_block, cstruct]:
+    sb_offset = None
+    for sb_offset in [c_qnx6.QNX6_BOOTBLOCK_SIZE, 0]:
+        fh.seek(sb_offset)
+        try:
+            sb = c_qnx6_le.qnx6_super_block(fh)
+        except EOFError:
+            continue
+
+        if sb.sb_magic == c_qnx6.QNX6_SUPER_MAGIC:
+            return sb_offset, sb, c_qnx6_le
+
+        # Try big-endian
+        fh.seek(sb_offset)
+        sb = c_qnx6_be.qnx6_super_block(fh)
+        if sb.sb_magic == c_qnx6.QNX6_SUPER_MAGIC:
+            return sb_offset, sb, c_qnx6_be
+
+    raise ValueError("Unable to find QNX6 superblock")
+
+
 def _generate_dataruns(fs: QNX6, size: int, pointers: list[int], levels: int) -> Iterator[tuple[int, int]]:
     if levels == 0:
         for ptr in pointers:
@@ -283,21 +287,3 @@ def _generate_dataruns(fs: QNX6, size: int, pointers: list[int], levels: int) ->
             fs.fh.seek((fs._blocks_offset + ptr) * fs.block_size)
             blocks = struct.unpack(f"{fs._c_qnx.endian}{fs.block_size // 4}I", fs.fh.read(fs.block_size))
             yield from _generate_dataruns(fs, size, blocks, levels - 1)
-
-
-if __name__ == "__main__":
-    import sys
-
-    from dissect.target import container, volume
-
-    vol = container.open(sys.argv[1])
-
-    if ".vmdk" in sys.argv[1]:
-        vs = volume.open(vol)
-        vol = vs.volumes[0]
-
-    fs = QNX6(vol)
-
-    from IPython import embed
-
-    embed(colors="Linux")
