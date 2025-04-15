@@ -2,6 +2,10 @@ class Error(Exception):
     pass
 
 
+class InvalidFilesystemError(Error):
+    pass
+
+
 class FileNotFoundError(Error, FileNotFoundError):
     pass
 

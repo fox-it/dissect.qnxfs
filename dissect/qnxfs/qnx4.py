@@ -15,6 +15,7 @@ from dissect.qnxfs.c_qnx4 import c_qnx4
 from dissect.qnxfs.exceptions import (
     Error,
     FileNotFoundError,
+    InvalidFilesystemError,
     NotADirectoryError,
     NotASymlinkError,
 )
@@ -33,18 +34,29 @@ class QNX4:
 
     def __init__(self, fh: BinaryIO):
         if not _is_qnx4(fh):
-            raise ValueError("Invalid QNX4 filesystem")
+            raise InvalidFilesystemError("Invalid QNX4 filesystem")
 
         self.fh = fh
         self.block_size = c_qnx4.QNX4_BLOCK_SIZE
         self.inode = lru_cache(1024)(self.inode)
 
-        self.root = INode(self, c_qnx4.QNX4_ROOT_INO * c_qnx4.QNX4_INODES_PER_BLOCK)
+        self.root = self.inode(c_qnx4.QNX4_ROOT_INO * c_qnx4.QNX4_INODES_PER_BLOCK)
 
     def inode(self, inum: int) -> INode:
+        """Return an inode object for the given inode number.
+
+        Args:
+            inum: The inode number.
+        """
         return INode(self, inum)
 
     def get(self, path: str | int, node: INode | None = None) -> INode:
+        """Return an inode object for the given path or inode number.
+
+        Args:
+            path: The path or inode number.
+            node: An optional inode object to relatively resolve the path from.
+        """
         if isinstance(path, int):
             return self.inode(path)
 

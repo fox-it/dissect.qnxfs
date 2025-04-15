@@ -17,6 +17,7 @@ from dissect.util.ts import from_unix
 from dissect.qnxfs.c_qnx6 import c_qnx6, c_qnx6_be, c_qnx6_le
 from dissect.qnxfs.exceptions import (
     FileNotFoundError,
+    InvalidFilesystemError,
     NotADirectoryError,
     NotASymlinkError,
 )
@@ -44,7 +45,7 @@ class QNX6:
         fh.seek(second_sb_offset)
         self.sb2 = self._c_qnx.qnx6_super_block(fh)
         if self.sb2.sb_magic != c_qnx6.QNX6_SUPER_MAGIC:
-            raise ValueError("Unable to find second QNX6 superblock")
+            raise InvalidFilesystemError("Unable to find second QNX6 superblock")
 
         self.sb = self.sb1 if self.sb1.sb_serial >= self.sb2.sb_serial else self.sb2
         self.ctime = from_unix(self.sb.sb_ctime)
@@ -74,11 +75,20 @@ class QNX6:
         self.root = self.inode(c_qnx6.QNX6_ROOT_INO)
 
     def inode(self, inum: int) -> INode:
-        """Return an inode by number."""
+        """Return an inode object for the given inode number.
+
+        Args:
+            inum: The inode number.
+        """
         return INode(self, inum)
 
     def get(self, path: str | int, node: INode | None = None) -> INode:
-        """Return an inode by path."""
+        """Return an inode object for the given path or inode number.
+
+        Args:
+            path: The path or inode number.
+            node: An optional inode object to relatively resolve the path from.
+        """
         if isinstance(path, int):
             return self.inode(path)
 
@@ -223,7 +233,7 @@ class INode:
 
         fh = self.open()
         while fh.tell() < self.size:
-            data = fh.read(32)
+            data = fh.read(c_qnx6.QNX6_DIR_ENTRY_SIZE)
 
             entry = self.fs._c_qnx.qnx6_dir_entry(data)
             if entry.de_inode == 0 or entry.de_size == 0:
@@ -251,7 +261,6 @@ class INode:
 
 
 def _find_sb(fh: BinaryIO) -> tuple[int, c_qnx6.qnx6_super_block, cstruct]:
-    sb_offset = None
     for sb_offset in [c_qnx6.QNX6_BOOTBLOCK_SIZE, 0]:
         fh.seek(sb_offset)
         try:
@@ -268,7 +277,7 @@ def _find_sb(fh: BinaryIO) -> tuple[int, c_qnx6.qnx6_super_block, cstruct]:
         if sb.sb_magic == c_qnx6.QNX6_SUPER_MAGIC:
             return sb_offset, sb, c_qnx6_be
 
-    raise ValueError("Unable to find QNX6 superblock")
+    raise InvalidFilesystemError("Unable to find QNX6 superblock")
 
 
 def _generate_dataruns(fs: QNX6, size: int, pointers: list[int], levels: int) -> Iterator[tuple[int, int]]:

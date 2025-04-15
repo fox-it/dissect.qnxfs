@@ -42,10 +42,12 @@ def test_qnx(name: str, FS: type[QNX4 | QNX6], request: pytest.FixtureRequest) -
     entry = fs.get("file.txt")
     assert entry.is_file()
     assert entry.open().read() == b"wow much qnx\n"
+    assert fs.get(entry.inum) is entry
 
     entry = fs.get("directory")
     assert entry.is_dir()
     assert list(entry.listdir().keys()) == [".", "..", "another.txt"]
+    assert fs.get(entry.inum) is entry
 
     entry = fs.get("dir")
     assert entry.is_symlink()
