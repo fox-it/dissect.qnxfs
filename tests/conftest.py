@@ -10,6 +10,7 @@ import pytest
 if typing.TYPE_CHECKING:
     from collections.abc import Iterator
 
+
 def absolute_path(filename: str) -> Path:
     return Path(__file__).parent / filename
 
